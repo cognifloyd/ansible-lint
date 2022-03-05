@@ -19,13 +19,13 @@ from ansiblelint.yaml_utils import nested_items_path
 
 
 class VariableHasSpacesRule(AnsibleLintRule, TransformMixin):
-    id = 'var-spacing'
-    base_msg = 'Variables should have spaces before and after: '
-    shortdesc = base_msg + ' {{ var_name }}'
-    description = 'Variables should have spaces before and after: ``{{ var_name }}``'
-    severity = 'LOW'
-    tags = ['formatting']
-    version_added = 'v4.0.0'
+    id = "var-spacing"
+    base_msg = "Variables should have spaces before and after: "
+    shortdesc = base_msg + " {{ var_name }}"
+    description = "Variables should have spaces before and after: ``{{ var_name }}``"
+    severity = "LOW"
+    tags = ["formatting"]
+    version_added = "v4.0.0"
 
     bracket_regex = re.compile(r"{{[^{\n' -]|[^ '\n}-]}}", re.MULTILINE | re.DOTALL)
     exclude_json_re = re.compile(r"[^{]{'\w+': ?[^{]{.*?}}", re.MULTILINE | re.DOTALL)
@@ -33,7 +33,7 @@ class VariableHasSpacesRule(AnsibleLintRule, TransformMixin):
     def matchtask(
         self, task: Dict[str, Any], file: Optional[Lintable] = None
     ) -> Union[bool, str]:
-        for k, v, _ in nested_items_path(task):
+        for _, v, _ in nested_items_path(task):
             if isinstance(v, str):
                 cleaned = self.exclude_json_re.sub("", v)
                 if bool(self.bracket_regex.search(cleaned)):
@@ -71,7 +71,7 @@ class VariableHasSpacesRule(AnsibleLintRule, TransformMixin):
             self._fixed(match)
 
 
-if 'pytest' in sys.modules:
+if "pytest" in sys.modules:
 
     import pytest
 
@@ -81,7 +81,7 @@ if 'pytest' in sys.modules:
     @pytest.fixture
     def error_expected_lines() -> List[int]:
         """Return list of expected error lines."""
-        return [23, 26, 29, 54, 65]
+        return [24, 27, 30, 56, 67]
 
     @pytest.fixture
     def test_playbook() -> str:

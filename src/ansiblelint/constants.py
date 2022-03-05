@@ -9,7 +9,7 @@ if sys.version_info >= (3, 8):
 else:
     from typing_extensions import Literal
 
-DEFAULT_RULESDIR = os.path.join(os.path.dirname(__file__), 'rules')
+DEFAULT_RULESDIR = os.path.join(os.path.dirname(__file__), "rules")
 CUSTOM_RULESDIR_ENVVAR = "ANSIBLE_LINT_CUSTOM_RULESDIR"
 
 INVALID_CONFIG_RC = 2
@@ -19,7 +19,7 @@ INVALID_PREREQUISITES_RC = 10
 EXIT_CONTROL_C_RC = 130
 
 # Minimal version of Ansible we support for runtime
-ANSIBLE_MIN_VERSION = "2.9"
+ANSIBLE_MIN_VERSION = "2.12"
 
 # Based on https://docs.ansible.com/ansible/latest/reference_appendices/config.html
 ANSIBLE_DEFAULT_ROLES_PATH = (
@@ -65,7 +65,7 @@ FileType = Literal[
     "playbook",
     "meta",  # role meta
     "tasks",  # includes pre_tasks, post_tasks
-    "handlers",  # very similar to tasks but with some specificts
+    "handlers",  # very similar to tasks but with some specifics
     # https://docs.ansible.com/ansible/latest/galaxy/user_guide.html#installing-roles-and-collections-from-the-same-requirements-yml-file
     "requirements",
     "role",  # that is a folder!
@@ -86,36 +86,36 @@ if sys.version_info[:2] < (3, 7):
 
 # Deprecated tags/ids and their newer names
 RENAMED_TAGS = {
-    '102': 'no-jinja-when',
-    '104': 'deprecated-bare-vars',
-    '105': 'deprecated-module',
-    '106': 'role-name',
-    '202': 'risky-octal',
-    '203': 'no-tabs',
-    '205': 'playbook-extension',
-    '206': 'var-spacing',
-    '207': 'no-jinja-nesting',
-    '208': 'risky-file-permissions',
-    '301': 'no-changed-when',
-    '302': 'deprecated-command-syntax',
-    '303': 'command-instead-of-module',
-    '304': 'inline-env-var',
-    '305': 'command-instead-of-shell',
-    '306': 'risky-shell-pipe',
-    '401': 'git-latest',
-    '402': 'hg-latest',
-    '403': 'package-latest',
-    '404': 'no-relative-paths',
-    '501': 'partial-become',
-    '502': 'unnamed-task',
-    '503': 'no-handler',
-    '504': 'deprecated-local-action',
-    '505': 'missing-import',
-    '601': 'literal-compare',
-    '602': 'empty-string-compare',
-    '701': 'meta-no-info',
-    '702': 'meta-no-tags',
-    '703': 'meta-incorrect',
-    '704': 'meta-video-links',
-    '911': 'syntax-check',
+    "102": "no-jinja-when",
+    "104": "deprecated-bare-vars",
+    "105": "deprecated-module",
+    "106": "role-name",
+    "202": "risky-octal",
+    "203": "no-tabs",
+    "205": "playbook-extension",
+    "206": "var-spacing",
+    "207": "no-jinja-nesting",
+    "208": "risky-file-permissions",
+    "301": "no-changed-when",
+    "302": "deprecated-command-syntax",
+    "303": "command-instead-of-module",
+    "304": "inline-env-var",
+    "305": "command-instead-of-shell",
+    "306": "risky-shell-pipe",
+    "401": "git-latest",
+    "402": "hg-latest",
+    "403": "package-latest",
+    "404": "no-relative-paths",
+    "501": "partial-become",
+    "502": "unnamed-task",
+    "503": "no-handler",
+    "504": "deprecated-local-action",
+    "505": "missing-import",
+    "601": "literal-compare",
+    "602": "empty-string-compare",
+    "701": "meta-no-info",
+    "702": "meta-no-tags",
+    "703": "meta-incorrect",
+    "704": "meta-video-links",
+    "911": "syntax-check",
 }

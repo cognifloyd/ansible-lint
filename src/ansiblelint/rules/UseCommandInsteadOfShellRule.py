@@ -32,11 +32,11 @@ FAIL_PLAY = """---
 - hosts: localhost
   tasks:
   - name: shell no pipe
-    shell: echo hello
+    ansible.builtin.shell: echo hello
     changed_when: false
 
   - name: shell with jinja filter
-    shell: echo {{ "hello"|upper }}
+    ansible.builtin.shell: echo {{ "hello"|upper }}
     changed_when: false
 
   - name: shell with jinja filter (fqcn)
@@ -48,47 +48,47 @@ SUCCESS_PLAY = """---
 - hosts: localhost
   tasks:
   - name: shell with pipe
-    shell: echo hello | true  # noqa: risky-shell-pipe
+    ansible.builtin.shell: echo hello | true  # noqa: risky-shell-pipe
     changed_when: false
 
   - name: shell with redirect
-    shell: echo hello >  /tmp/hello
+    ansible.builtin.shell: echo hello >  /tmp/hello
     changed_when: false
 
   - name: chain two shell commands
-    shell: echo hello && echo goodbye
+    ansible.builtin.shell: echo hello && echo goodbye
     changed_when: false
 
   - name: run commands in succession
-    shell: echo hello ; echo goodbye
+    ansible.builtin.shell: echo hello ; echo goodbye
     changed_when: false
 
   - name: use variables
-    shell: echo $HOME $USER
+    ansible.builtin.shell: echo $HOME $USER
     changed_when: false
 
   - name: use * for globbing
-    shell: ls foo*
+    ansible.builtin.shell: ls foo*
     changed_when: false
 
   - name: use ? for globbing
-    shell: ls foo?
+    ansible.builtin.shell: ls foo?
     changed_when: false
 
   - name: use [] for globbing
-    shell: ls foo[1,2,3]
+    ansible.builtin.shell: ls foo[1,2,3]
     changed_when: false
 
   - name: use shell generator
-    shell: ls foo{.txt,.xml}
+    ansible.builtin.shell: ls foo{.txt,.xml}
     changed_when: false
 
   - name: use backticks
-    shell: ls `ls foo*`
+    ansible.builtin.shell: ls `ls foo*`
     changed_when: false
 
   - name: use shell with cmd
-    shell:
+    ansible.builtin.shell:
       cmd: |
         set -x
         ls foo?
@@ -97,30 +97,30 @@ SUCCESS_PLAY = """---
 
 
 class UseCommandInsteadOfShellRule(AnsibleLintRule):
-    id = 'command-instead-of-shell'
-    shortdesc = 'Use shell only when shell functionality is required'
+    id = "command-instead-of-shell"
+    shortdesc = "Use shell only when shell functionality is required"
     description = (
-        'Shell should only be used when piping, redirecting '
-        'or chaining commands (and Ansible would be preferred '
-        'for some of those!)'
+        "Shell should only be used when piping, redirecting "
+        "or chaining commands (and Ansible would be preferred "
+        "for some of those!)"
     )
-    severity = 'HIGH'
-    tags = ['command-shell', 'idiom']
-    version_added = 'historic'
+    severity = "HIGH"
+    tags = ["command-shell", "idiom"]
+    version_added = "historic"
 
     def matchtask(
-        self, task: Dict[str, Any], file: 'Optional[Lintable]' = None
+        self, task: Dict[str, Any], file: "Optional[Lintable]" = None
     ) -> Union[bool, str]:
         # Use unjinja so that we don't match on jinja filters
         # rather than pipes
-        if task["action"]["__ansible_module__"] in ['shell', 'ansible.builtin.shell']:
-            if 'cmd' in task['action']:
-                unjinjad_cmd = self.unjinja(task["action"].get("cmd", []))
+        if task["action"]["__ansible_module__"] in ["shell", "ansible.builtin.shell"]:
+            if "cmd" in task["action"]:
+                jinja_stripped_cmd = self.unjinja(task["action"].get("cmd", []))
             else:
-                unjinjad_cmd = self.unjinja(
-                    ' '.join(task["action"].get("__ansible_arguments__", []))
+                jinja_stripped_cmd = self.unjinja(
+                    " ".join(task["action"].get("__ansible_arguments__", []))
                 )
-            return not any(ch in unjinjad_cmd for ch in '&|<>;$\n*[]{}?`')
+            return not any(ch in jinja_stripped_cmd for ch in "&|<>;$\n*[]{}?`")
         return False
 
 
@@ -131,7 +131,7 @@ if "pytest" in sys.modules:
 
     from ansiblelint.testing import RunFromText  # pylint: disable=ungrouped-imports
 
-    @pytest.mark.parametrize(('text', 'expected'), ((SUCCESS_PLAY, 0), (FAIL_PLAY, 3)))
+    @pytest.mark.parametrize(("text", "expected"), ((SUCCESS_PLAY, 0), (FAIL_PLAY, 3)))
     def test_rule_command_instead_of_shell(
         default_text_runner: RunFromText, text: str, expected: int
     ) -> None:

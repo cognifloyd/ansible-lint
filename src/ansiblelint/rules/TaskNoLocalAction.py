@@ -11,20 +11,20 @@ from ansiblelint.yaml_utils import iter_tasks_in_file
 
 
 class TaskNoLocalAction(AnsibleLintRule, TransformMixin):
-    id = 'deprecated-local-action'
+    id = "deprecated-local-action"
     shortdesc = "Do not use 'local_action', use 'delegate_to: localhost'"
-    description = 'Do not use ``local_action``, use ``delegate_to: localhost``'
+    description = "Do not use ``local_action``, use ``delegate_to: localhost``"
     transform_description = (
         "Using ``local_action`` is deprecated. This updates your "
         "playbooks by replacing ``local_action`` tasks with: "
         "``delegate_to: localhost``"
     )
-    severity = 'MEDIUM'
-    tags = ['deprecations']
-    version_added = 'v4.0.0'
+    severity = "MEDIUM"
+    tags = ["deprecations"]
+    version_added = "v4.0.0"
 
     def match(self, line: str) -> Union[bool, str]:
-        if 'local_action' in line:
+        if "local_action" in line:
             return True
         return False
 

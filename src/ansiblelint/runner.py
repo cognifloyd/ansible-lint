@@ -116,7 +116,7 @@ class Runner:
 
         # playbooks: List[Lintable] = []
         for lintable in self.lintables:
-            if lintable.kind != 'playbook':
+            if lintable.kind != "playbook":
                 continue
             files.append(lintable)
 
@@ -132,7 +132,7 @@ class Runner:
 
             # do our processing only when ansible syntax check passed in order
             # to avoid causing runtime exceptions. Our processing is not as
-            # relisient to be able process garbage.
+            # resilient to be able process garbage.
             matches.extend(self._emit_matches(files))
 
             # remove duplicates from files list

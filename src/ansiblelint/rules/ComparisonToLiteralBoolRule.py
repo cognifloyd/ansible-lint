@@ -52,20 +52,20 @@ class CompareNodeTransformer(NodeTransformer):
 
 
 class ComparisonToLiteralBoolRule(AnsibleLintRule, TransformMixin):
-    id = 'literal-compare'
+    id = "literal-compare"
     shortdesc = "Don't compare to literal True/False"
     description = (
-        'Use ``when: var`` rather than ``when: var == True`` '
-        '(or conversely ``when: not var``)'
+        "Use ``when: var`` rather than ``when: var == True`` "
+        "(or conversely ``when: not var``)"
     )
     transform_description = (
         "Comparing to literal True/False is unnecessary. This "
         "simplifies when conditions in playbooks to remove "
         "`== True` and replace `== False` with `not`."
     )
-    severity = 'HIGH'
-    tags = ['idiom']
-    version_added = 'v4.0.0'
+    severity = "HIGH"
+    tags = ["idiom"]
+    version_added = "v4.0.0"
 
     literal_bool_compare = re.compile("[=!]= ?(True|true|False|false)")
 
@@ -74,7 +74,7 @@ class ComparisonToLiteralBoolRule(AnsibleLintRule, TransformMixin):
     ) -> Union[bool, str]:
         for k, v, _ in nested_items_path(task):
             # TODO: also handle k.endswith("_when") (changed_when, failed_when, ...)
-            if k == 'when':
+            if k == "when":
                 if isinstance(v, str):
                     if self.literal_bool_compare.search(v):
                         return True

@@ -2,5 +2,5 @@
 - name: This should raise syntax-error
   hosts: localhost
   tasks:
-    debug:
-      msg: "Note that `tasks` is not entered as a list."
+    ansible.builtin.debug:
+      msg: Note that `tasks` is not entered as a list.

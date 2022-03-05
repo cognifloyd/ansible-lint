@@ -1,11 +1,77 @@
 """Utility helpers to simplify working with yaml-based data."""
 import functools
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union, cast
+import logging
+import os
+import re
+from io import StringIO
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Pattern,
+    Tuple,
+    Union,
+    cast,
+)
+
+import ruamel.yaml.events
+from ruamel.yaml.constructor import RoundTripConstructor
+from ruamel.yaml.emitter import Emitter
+
+# Module 'ruamel.yaml' does not explicitly export attribute 'YAML'; implicit reexport disabled
+# To make the type checkers happy, we import from ruamel.yaml.main instead.
+from ruamel.yaml.main import YAML
+from ruamel.yaml.nodes import ScalarNode
+from ruamel.yaml.representer import RoundTripRepresenter
+from ruamel.yaml.scalarint import ScalarInt
+from ruamel.yaml.tokens import CommentToken
+from yamllint.config import YamlLintConfig
 
 import ansiblelint.skip_utils
 from ansiblelint.errors import MatchError
 from ansiblelint.file_utils import Lintable
 from ansiblelint.utils import get_action_tasks, normalize_task, parse_yaml_linenumbers
+
+_logger = logging.getLogger(__name__)
+
+YAMLLINT_CONFIG = """
+extends: default
+rules:
+  comments:
+    # https://github.com/prettier/prettier/issues/6780
+    min-spaces-from-content: 1
+  # https://github.com/adrienverge/yamllint/issues/384
+  comments-indentation: false
+  document-start: disable
+  # 160 chars was the default used by old E204 rule, but
+  # you can easily change it or disable in your .yamllint file.
+  line-length:
+    max: 160
+"""
+
+
+@functools.lru_cache(maxsize=1)
+def load_yamllint_config() -> YamlLintConfig:
+    """Load our default yamllint config and any customized override file."""
+    config = YamlLintConfig(content=YAMLLINT_CONFIG)
+    # if we detect local yamllint config we use it but raise a warning
+    # as this is likely to get out of sync with our internal config.
+    for file in [".yamllint", ".yamllint.yaml", ".yamllint.yml"]:
+        if os.path.isfile(file):
+            _logger.warning(
+                "Loading custom %s config file, this extends our "
+                "internal yamllint config.",
+                file,
+            )
+            config_override = YamlLintConfig(file=file)
+            config_override.extend(config)
+            config = config_override
+            break
+    _logger.debug("Effective yamllint rules used: %s", config.rules)
+    return config
 
 
 def iter_tasks_in_file(
@@ -47,8 +113,8 @@ def iter_tasks_in_file(
         # An empty `tags` block causes `None` to be returned if
         # the `or []` is not present - `task.get('tags', [])`
         # does not suffice.
-        skipped_in_task_tag = 'skip_ansible_lint' in (raw_task.get('tags') or [])
-        skipped_in_yaml_comment = rule_id in raw_task.get('skipped_rules', ())
+        skipped_in_task_tag = "skip_ansible_lint" in (raw_task.get("tags") or [])
+        skipped_in_yaml_comment = rule_id in raw_task.get("skipped_rules", ())
         skipped = skipped_in_task_tag or skipped_in_yaml_comment
         if skipped:
             yield raw_task, raw_task, skipped, err
@@ -157,3 +223,521 @@ def _nested_items_path(
             yield from _nested_items_path(
                 data_collection=value, parent_path=parent_path + [key]
             )
+
+
+class OctalIntYAML11(ScalarInt):
+    """OctalInt representation for YAML 1.1."""
+
+    # tell mypy that ScalarInt has these attributes
+    _width: Any
+    _underscore: Any
+
+    def __new__(cls, *args: Any, **kwargs: Any) -> Any:
+        """Create a new int with ScalarInt-defined attributes."""
+        return ScalarInt.__new__(cls, *args, **kwargs)
+
+    @staticmethod
+    def represent_octal(
+        representer: RoundTripRepresenter, data: "OctalIntYAML11"
+    ) -> Any:
+        """Return a YAML 1.1 octal representation.
+
+        Based on ruamel.yaml.representer.RoundTripRepresenter.represent_octal_int()
+        (which only handles the YAML 1.2 octal representation).
+        """
+        s = format(data, "o")
+        anchor = data.yaml_anchor(any=True)
+        # noinspection PyProtectedMember
+        return representer.insert_underscore("0", s, data._underscore, anchor=anchor)
+
+
+class CustomConstructor(RoundTripConstructor):
+    """Custom YAML constructor that preserves Octal formatting in YAML 1.1."""
+
+    def construct_yaml_int(self, node: ScalarNode) -> Any:
+        """Construct int while preserving Octal formatting in YAML 1.1.
+
+        ruamel.yaml only preserves the octal format for YAML 1.2.
+        For 1.1, it converts the octal to an int. So, we preserve the format.
+
+        Code partially copied from ruamel.yaml (MIT licensed).
+        """
+        ret = super().construct_yaml_int(node)
+        if self.resolver.processing_version == (1, 1) and isinstance(ret, int):
+            # see if we've got an octal we need to preserve.
+            value_su = self.construct_scalar(node)
+            try:
+                sx = value_su.rstrip("_")
+                underscore = [len(sx) - sx.rindex("_") - 1, False, False]  # type: Any
+            except ValueError:
+                underscore = None
+            except IndexError:
+                underscore = None
+            value_s = value_su.replace("_", "")
+            if value_s[0] in "+-":
+                value_s = value_s[1:]
+            if value_s[0] == "0":
+                # got an octal in YAML 1.1
+                ret = OctalIntYAML11(
+                    ret, width=None, underscore=underscore, anchor=node.anchor
+                )
+        return ret
+
+
+CustomConstructor.add_constructor(
+    "tag:yaml.org,2002:int", CustomConstructor.construct_yaml_int
+)
+
+
+class FormattedEmitter(Emitter):
+    """Emitter that applies custom formatting rules when dumping YAML.
+
+    Differences from ruamel.yaml defaults:
+
+      - indentation of root-level sequences
+      - prefer double-quoted scalars over single-quoted scalars
+
+    This ensures that root-level sequences are never indented.
+    All subsequent levels are indented as configured (normal ruamel.yaml behavior).
+
+    Earlier implementations used dedent on ruamel.yaml's dumped output,
+    but string magic like that had a ton of problematic edge cases.
+    """
+
+    preferred_quote = '"'  # either " or '
+
+    _sequence_indent = 2
+    _sequence_dash_offset = 0  # Should be _sequence_indent - 2
+    _root_is_sequence = False
+
+    _in_empty_flow_map = False
+
+    @property
+    def _is_root_level_sequence(self) -> bool:
+        """Return True if this is a sequence at the root level of the yaml document."""
+        return self.column < 2 and self._root_is_sequence
+
+    def expect_node(
+        self,
+        root: bool = False,
+        sequence: bool = False,
+        mapping: bool = False,
+        simple_key: bool = False,
+    ) -> None:
+        """Expect node (extend to record if the root doc is a sequence)."""
+        if root and isinstance(self.event, ruamel.yaml.events.SequenceStartEvent):
+            self._root_is_sequence = True
+        return super().expect_node(root, sequence, mapping, simple_key)
+
+    # NB: mypy does not support overriding attributes with properties yet:
+    #     https://github.com/python/mypy/issues/4125
+    #     To silence we have to ignore[override] both the @property and the method.
+
+    @property  # type: ignore[override]
+    def best_sequence_indent(self) -> int:  # type: ignore[override]
+        """Return the configured sequence_indent or 2 for root level."""
+        return 2 if self._is_root_level_sequence else self._sequence_indent
+
+    @best_sequence_indent.setter
+    def best_sequence_indent(self, value: int) -> None:
+        """Configure how many columns to indent each sequence item (including the '-')."""
+        self._sequence_indent = value
+
+    @property  # type: ignore[override]
+    def sequence_dash_offset(self) -> int:  # type: ignore[override]
+        """Return the configured sequence_dash_offset or 2 for root level."""
+        return 0 if self._is_root_level_sequence else self._sequence_dash_offset
+
+    @sequence_dash_offset.setter
+    def sequence_dash_offset(self, value: int) -> None:
+        """Configure how many spaces to put before each sequence item's '-'."""
+        self._sequence_dash_offset = value
+
+    def choose_scalar_style(self) -> Any:
+        """Select how to quote scalars if needed."""
+        style = super().choose_scalar_style()
+        if style != "'":
+            # block scalar, double quoted, etc.
+            return style
+        if '"' in self.event.value:
+            return "'"
+        return self.preferred_quote
+
+    def write_indicator(
+        self,
+        indicator: str,  # ruamel.yaml typehint is wrong. This is a string.
+        need_whitespace: bool,
+        whitespace: bool = False,
+        indention: bool = False,  # (sic) ruamel.yaml has this typo in their API
+    ) -> None:
+        """Make sure that flow maps get whitespace by the curly braces."""
+        # If this is the end of the flow mapping that isn't on a new line:
+        if (
+            indicator == "}"
+            and (self.column or 0) > (self.indent or 0)
+            and not self._in_empty_flow_map
+        ):
+            indicator = " }"
+            self._in_empty_flow_map = False
+        super().write_indicator(indicator, need_whitespace, whitespace, indention)
+        # if it is the start of a flow mapping, and it's not time
+        # to wrap the lines, insert a space.
+        if indicator == "{" and self.column < self.best_width:
+            if self.check_empty_mapping():
+                self._in_empty_flow_map = True
+            else:
+                self.column += 1
+                self.stream.write(" ")
+
+    # "/n/n" results in one blank line (end the previous line, then newline).
+    # So, "/n/n/n" or more is too many new lines. Clean it up.
+    _re_repeat_blank_lines: Pattern[str] = re.compile(r"\n{3,}")
+
+    # We might need to fix the indent for comments
+    _re_full_line_comment: Pattern[str] = re.compile(r"\n( *)#")
+
+    # comment is a CommentToken, not Any (Any is ruamel.yaml's lazy type hint).
+    def write_comment(self, comment: CommentToken, pre: bool = False) -> None:
+        """Clean up extra new lines and spaces in comments.
+
+        ruamel.yaml treats new or empty lines as comments.
+        See: https://stackoverflow.com/a/42712747/1134951
+        """
+        value: str = comment.value
+        if (
+            pre
+            and not value.strip()
+            and not isinstance(
+                self.event,
+                (
+                    ruamel.yaml.events.CollectionEndEvent,
+                    ruamel.yaml.events.DocumentEndEvent,
+                    ruamel.yaml.events.StreamEndEvent,
+                ),
+            )
+        ):
+            # drop pure whitespace pre comments
+            # does not apply to End events since they consume one of the newlines.
+            value = ""
+        elif pre:
+            # preserve content in pre comment with at least one newline,
+            # but no extra blank lines.
+            value = self._re_repeat_blank_lines.sub("\n", value)
+        else:
+            # single blank lines in post comments
+            value = self._re_repeat_blank_lines.sub("\n\n", value)
+        comment.value = value
+
+        # make sure that the eol comment only has one space before it.
+        if comment.column > self.column + 1 and not pre:
+            comment.column = self.column + 1
+
+        return super().write_comment(comment, pre)
+
+    def write_version_directive(self, version_text: Any) -> None:
+        """Skip writing '%YAML 1.1'."""
+        if version_text == "1.1":
+            return
+        return super().write_version_directive(version_text)
+
+
+class FormattedYAML(YAML):
+    """A YAML loader/dumper that handles ansible content better by default."""
+
+    def __init__(
+        self,
+        *,
+        typ: Optional[str] = None,
+        pure: bool = False,
+        output: Any = None,
+        # input: Any = None,
+        plug_ins: Optional[List[str]] = None,
+    ):
+        """Return a configured ``ruamel.yaml.YAML`` instance.
+
+        Some config defaults get extracted from the yamllint config.
+
+        ``ruamel.yaml.YAML`` uses attributes to configure how it dumps yaml files.
+        Some of these settings can be confusing, so here are examples of how different
+        settings will affect the dumped yaml.
+
+        This example does not indent any sequences:
+
+        .. code:: python
+
+            yaml.explicit_start=True
+            yaml.map_indent=2
+            yaml.sequence_indent=2
+            yaml.sequence_dash_offset=0
+
+        .. code:: yaml
+
+            ---
+            - name: playbook
+              tasks:
+              - name: task
+
+        This example indents all sequences including the root-level:
+
+        .. code:: python
+
+            yaml.explicit_start=True
+            yaml.map_indent=2
+            yaml.sequence_indent=4
+            yaml.sequence_dash_offset=2
+            # yaml.Emitter defaults to ruamel.yaml.emitter.Emitter
+
+        .. code:: yaml
+
+            ---
+              - name: playbook
+                tasks:
+                  - name: task
+
+        This example indents all sequences except at the root-level:
+
+        .. code:: python
+
+            yaml.explicit_start=True
+            yaml.map_indent=2
+            yaml.sequence_indent=4
+            yaml.sequence_dash_offset=2
+            yaml.Emitter = FormattedEmitter  # custom Emitter prevents root-level indents
+
+        .. code:: yaml
+
+            ---
+            - name: playbook
+              tasks:
+                - name: task
+        """
+        # Default to reading/dumping YAML 1.1 (ruamel.yaml defaults to 1.2)
+        self._yaml_version_default: Tuple[int, int] = (1, 1)
+        self._yaml_version: Union[str, Tuple[int, int]] = self._yaml_version_default
+
+        super().__init__(typ=typ, pure=pure, output=output, plug_ins=plug_ins)
+
+        # NB: We ignore some mypy issues because ruamel.yaml typehints are not great.
+
+        config = self._defaults_from_yamllint_config()
+
+        # these settings are derived from yamllint config
+        self.explicit_start: bool = config["explicit_start"]  # type: ignore[assignment]
+        self.explicit_end: bool = config["explicit_end"]  # type: ignore[assignment]
+        self.width: int = config["width"]  # type: ignore[assignment]
+        indent_sequences: bool = cast(bool, config["indent_sequences"])
+        preferred_quote: str = cast(str, config["preferred_quote"])  # either ' or "
+
+        self.default_flow_style = False
+        self.compact_seq_seq = True  # type: ignore[assignment] # dash after dash
+        self.compact_seq_map = True  # type: ignore[assignment] # key after dash
+
+        # Do not use yaml.indent() as it obscures the purpose of these vars:
+        self.map_indent = 2  # type: ignore[assignment]
+        self.sequence_indent = 4 if indent_sequences else 2  # type: ignore[assignment]
+        self.sequence_dash_offset = self.sequence_indent - 2  # type: ignore[operator]
+
+        # If someone doesn't want our FormattedEmitter, they can change it.
+        self.Emitter = FormattedEmitter
+
+        # ignore invalid preferred_quote setting
+        if preferred_quote in ['"', "'"]:
+            FormattedEmitter.preferred_quote = preferred_quote
+        # NB: default_style affects preferred_quote as well.
+        # self.default_style ∈ None (default), '', '"', "'", '|', '>'
+
+        # We need a custom constructor to preserve Octal formatting in YAML 1.1
+        self.Constructor = CustomConstructor
+        self.Representer.add_representer(OctalIntYAML11, OctalIntYAML11.represent_octal)
+
+        # TODO: preserve_quotes loads all strings as a str subclass that carries
+        #       a quote attribute. Will the str subclasses cause problems in transforms?
+        #       Are there any other gotchas to this?
+        # This will only preserve quotes for strings read from the file.
+        # anything modified by the transform will use no quotes, preferred_quote,
+        # or the quote that results in the least amount of escaping.
+        # self.preserve_quotes = True
+
+        # If needed, we can use this to change null representation to be explicit
+        # (see https://stackoverflow.com/a/44314840/1134951)
+        # self.Representer.add_representer(
+        #     type(None),
+        #     lambda self, data: self.represent_scalar("tag:yaml.org,2002:null", "null"),
+        # )
+
+    @staticmethod
+    def _defaults_from_yamllint_config() -> Dict[str, Union[bool, int, str]]:
+        """Extract FormattedYAML-relevant settings from yamllint config if possible."""
+        config = {
+            "explicit_start": True,
+            "explicit_end": False,
+            "width": 160,
+            "indent_sequences": True,
+            "preferred_quote": '"',
+        }
+        for rule, rule_config in load_yamllint_config().rules.items():
+            if not rule_config:
+                # rule disabled
+                continue
+
+            if rule == "document-start":
+                config["explicit_start"] = rule_config["present"]
+            elif rule == "document-end":
+                config["explicit_end"] = rule_config["present"]
+            elif rule == "line-length":
+                config["width"] = rule_config["max"]
+            elif rule == "indentation":
+                indent_sequences = rule_config["indent-sequences"]
+                # one of: bool, "whatever", "consistent"
+                # so, we use True for "whatever" and "consistent"
+                config["indent_sequences"] = bool(indent_sequences)
+            elif rule == "quoted-strings":
+                quote_type = rule_config["quote-type"]
+                # one of: single, double, any
+                if quote_type == "single":
+                    config["preferred_quote"] = "'"
+                elif quote_type == "double":
+                    config["preferred_quote"] = '"'
+
+        return cast(Dict[str, Union[bool, int, str]], config)
+
+    @property  # type: ignore[override]
+    def version(self) -> Union[str, Tuple[int, int]]:  # type: ignore[override]
+        """Return the YAML version used to parse or dump.
+
+        Ansible uses PyYAML which only supports YAML 1.1. ruamel.yaml defaults to 1.2.
+        So, we have to make sure we dump yaml files using YAML 1.1.
+        We can relax the version requirement once ansible uses a version of PyYAML
+        that includes this PR: https://github.com/yaml/pyyaml/pull/555
+        """
+        return self._yaml_version
+
+    @version.setter
+    def version(self, value: Optional[Union[str, Tuple[int, int]]]) -> None:
+        """Ensure that yaml version uses our default value.
+
+        The yaml Reader updates this value based on the ``%YAML`` directive in files.
+        So, if a file does not include the directive, it sets this to None.
+        But, None effectively resets the parsing version to YAML 1.2 (ruamel's default).
+        """
+        self._yaml_version = value if value is not None else self._yaml_version_default
+
+    def loads(self, stream: str) -> Any:
+        """Load YAML content from a string while avoiding known ruamel.yaml issues."""
+        # TODO: maybe add support for passing a Lintable for the stream.
+        if not isinstance(stream, str):
+            raise NotImplementedError(f"expected a str but got {type(stream)}")
+        text, preamble_comment = self._pre_process_yaml(stream)
+        data = self.load(stream=text)
+        if preamble_comment is not None:
+            setattr(data, "preamble_comment", preamble_comment)
+        return data
+
+    def dumps(self, data: Any) -> str:
+        """Dump YAML document to string (including its preamble_comment)."""
+        preamble_comment: Optional[str] = getattr(data, "preamble_comment", None)
+        with StringIO() as stream:
+            if preamble_comment:
+                stream.write(preamble_comment)
+            self.dump(data, stream)
+            text = stream.getvalue()
+        return self._post_process_yaml(text)
+
+    # ruamel.yaml only preserves empty (no whitespace) blank lines
+    # (ie "/n/n" becomes "/n/n" but "/n  /n" becomes "/n").
+    # So, we need to identify whitespace-only lines to drop spaces before reading.
+    _whitespace_only_lines_re = re.compile(r"^ +$", re.MULTILINE)
+
+    def _pre_process_yaml(self, text: str) -> Tuple[str, Optional[str]]:
+        """Handle known issues with ruamel.yaml loading.
+
+        Preserve blank lines despite extra whitespace.
+        Preserve any preamble (aka header) comments before "---".
+
+        For more on preamble comments, see: https://stackoverflow.com/a/70287507/1134951
+        """
+        text = self._whitespace_only_lines_re.sub("", text)
+
+        # I investigated extending ruamel.yaml to capture preamble comments.
+        #   preamble comment goes from:
+        #     DocumentStartToken.comment -> DocumentStartEvent.comment
+        #   Then, in the composer:
+        #     once in composer.current_event
+        #       composer.compose_document()
+        #         discards DocumentStartEvent
+        #           move DocumentStartEvent to composer.last_event
+        #           node = composer.compose_node(None, None)
+        #             all document nodes get composed (events get used)
+        #         discard DocumentEndEvent
+        #           move DocumentEndEvent to composer.last_event
+        #         return node
+        # So, there's no convenient way to extend the composer
+        # to somehow capture the comments and pass them on.
+
+        preamble_comments = []
+        if "\n---\n" not in text and "\n--- " not in text:
+            # nothing is before the document start mark,
+            # so there are no comments to preserve.
+            return text, None
+        for line in text.splitlines(True):
+            # We only need to capture the preamble comments. No need to remove them.
+            # lines might also include directives.
+            if line.lstrip().startswith("#") or line == "\n":
+                preamble_comments.append(line)
+            elif line.startswith("---"):
+                break
+
+        return text, "".join(preamble_comments) or None
+
+    @staticmethod
+    def _post_process_yaml(text: str) -> str:
+        """Handle known issues with ruamel.yaml dumping.
+
+        Make sure there's only one newline at the end of the file.
+
+        Fix the indent of full-line comments to match the indent of the next line.
+        See: https://stackoverflow.com/a/71355688/1134951
+
+        Make sure null list items don't end in a space.
+        """
+        text = text.rstrip("\n") + "\n"
+
+        lines = text.splitlines(keepends=True)
+        full_line_comments: List[Tuple[int, str]] = []
+        for i, line in enumerate(lines):
+            stripped = line.lstrip()
+            if not stripped:
+                # blank line. Move on.
+                continue
+
+            space_length = len(line) - len(stripped)
+
+            if stripped.startswith("#"):
+                # got a full line comment
+
+                # allow some full line comments to match the previous indent
+                if i > 0 and not full_line_comments and space_length:
+                    prev = lines[i - 1]
+                    prev_space_length = len(prev) - len(prev.lstrip())
+                    is_first_line_of_string = bool(
+                        set(prev.rstrip()[-2:]).intersection({"|", ">"})
+                    )
+                    if prev_space_length == space_length or is_first_line_of_string:
+                        # if the indent matches the previous line's indent, skip it.
+                        continue
+
+                full_line_comments.append((i, stripped))
+            elif full_line_comments:
+                # end of full line comments so adjust to match indent of this line
+                spaces = " " * space_length
+                for index, comment in full_line_comments:
+                    lines[index] = spaces + comment
+                full_line_comments.clear()
+
+            cleaned = line.strip()
+            if not cleaned.startswith("#") and cleaned.endswith("-"):
+                # got an empty list item. drop any trailing spaces.
+                lines[i] = line.rstrip() + "\n"
+
+        text = "".join(lines)
+        return text

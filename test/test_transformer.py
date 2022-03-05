@@ -22,37 +22,10 @@ def copy_examples_dir(
     """Fixture that copies the examples/ dir into a tmpdir."""
     examples_dir = py.path.local("examples")
     examples_dir.copy(tmpdir / "examples")
-    oldcwd = tmpdir.chdir()
+    old_cwd = tmpdir.chdir()
     config_options.cwd = tmpdir
-    yield oldcwd, tmpdir
-    oldcwd.chdir()
-
-
-@pytest.fixture
-def config_options(config_options: Namespace, opts: Dict[str, Any]) -> Namespace:
-    """Return a test-specific set of options."""
-    # mirror default_rules_collection fixture setting
-    config_options.enable_list = ['no-same-owner', 'facts-namespacing']
-
-    # our defaults
-    config_options.fmt_yaml_files = True
-    config_options.do_transforms = True
-
-    # per-test option overrides
-    # opt is an option name in ansiblelint.config.options
-    for opt, value in opts.items():
-        if isinstance(value, list):
-            getattr(config_options, opt).extend(value)
-        else:
-            setattr(config_options, opt, value)
-    return config_options
-
-
-@pytest.fixture
-def rules_collection(config_options: Namespace) -> RulesCollection:
-    """Return default rule collection."""
-    assert os.path.isdir(DEFAULT_RULESDIR)
-    return RulesCollection(rulesdirs=[DEFAULT_RULESDIR], options=config_options)
+    yield old_cwd, tmpdir
+    old_cwd.chdir()
 
 
 @pytest.fixture
@@ -240,10 +213,7 @@ def test_transformer(
     Based on TestRunner::test_runner
     """
     transformer = Transformer(result=runner_result)
-    transformer.run(
-        fmt_yaml_files=config_options.fmt_yaml_files,
-        do_transforms=config_options.do_transforms,
-    )
+    transformer.run()
 
     matches = runner_result.matches
     assert len(matches) == matches_count

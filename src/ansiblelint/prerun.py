@@ -10,15 +10,9 @@ from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import packaging
-import tenacity
 from packaging import version
 
-from ansiblelint.config import (
-    ansible_collections_path,
-    collection_list,
-    options,
-    parse_ansible_version,
-)
+from ansiblelint.config import ansible_collections_path, options, parse_ansible_version
 from ansiblelint.constants import (
     ANSIBLE_DEFAULT_ROLES_PATH,
     ANSIBLE_MIN_VERSION,
@@ -35,7 +29,7 @@ _logger = logging.getLogger(__name__)
 def check_ansible_presence(exit_on_error: bool = False) -> Tuple[str, str]:
     """Assures we stop execution if Ansible is missing or outdated.
 
-    Returne found version and an optional exception if something wrong
+    Returns found version and an optional exception if something wrong
     was detected.
     """
 
@@ -106,7 +100,6 @@ def install_collection(collection: str, destination: Optional[str] = None) -> No
         "ansible-galaxy",
         "collection",
         "install",
-        "--force",  # required for ansible 2.9
         "-v",
     ]
     if destination:
@@ -126,12 +119,6 @@ def install_collection(collection: str, destination: Optional[str] = None) -> No
         sys.exit(INVALID_PREREQUISITES_RC)
 
 
-@tenacity.retry(  # Retry up to 3 times as galaxy server can return errors
-    reraise=True,
-    wait=tenacity.wait_fixed(30),  # type: ignore
-    stop=tenacity.stop_after_attempt(3),  # type: ignore
-    before_sleep=tenacity.after_log(_logger, logging.WARNING),  # type: ignore
-)
 def install_requirements(requirement: str) -> None:
     """Install dependencies from a requirements.yml."""
     if not os.path.exists(requirement):
@@ -141,7 +128,6 @@ def install_requirements(requirement: str) -> None:
         "ansible-galaxy",
         "role",
         "install",
-        "--force",  # required for ansible 2.9
         "--roles-path",
         f"{options.cache_dir}/roles",
         "-vr",
@@ -167,7 +153,6 @@ def install_requirements(requirement: str) -> None:
             "ansible-galaxy",
             "collection",
             "install",
-            "--force",  # required for ansible 2.9
             "-p",
             f"{options.cache_dir}/collections",
             "-vr",
@@ -218,9 +203,9 @@ def prepare_environment(required_collections: Optional[Dict[str, str]] = None) -
 
 def _get_galaxy_role_ns(galaxy_infos: Dict[str, Any]) -> str:
     """Compute role namespace from meta/main.yml, including trailing dot."""
-    role_namespace = galaxy_infos.get('namespace', "")
+    role_namespace = galaxy_infos.get("namespace", "")
     if len(role_namespace) == 0:
-        role_namespace = galaxy_infos.get('author', "")
+        role_namespace = galaxy_infos.get("author", "")
     # if there's a space in the name space, it's likely author name
     # and not the galaxy login, so act as if there was no namespace
     if re.match(r"^\w+ \w+", role_namespace):
@@ -234,7 +219,7 @@ def _get_galaxy_role_ns(galaxy_infos: Dict[str, Any]) -> str:
 
 def _get_galaxy_role_name(galaxy_infos: Dict[str, Any]) -> str:
     """Compute role name from meta/main.yml."""
-    return galaxy_infos.get('role_name', "")
+    return galaxy_infos.get("role_name", "")
 
 
 def _get_role_fqrn(galaxy_infos: Dict[str, Any]) -> str:
@@ -243,7 +228,7 @@ def _get_role_fqrn(galaxy_infos: Dict[str, Any]) -> str:
     role_name = _get_galaxy_role_name(galaxy_infos)
     if len(role_name) == 0:
         role_name = pathlib.Path(".").absolute().name
-        role_name = re.sub(r'(ansible-|ansible-role-)', '', role_name)
+        role_name = re.sub(r"(ansible-|ansible-role-)", "", role_name)
 
     return f"{role_namespace}{role_name}"
 
@@ -253,12 +238,12 @@ def _install_galaxy_role() -> None:
     if not os.path.exists("meta/main.yml"):
         return
     yaml = yaml_from_file("meta/main.yml")
-    if 'galaxy_info' not in yaml:
+    if "galaxy_info" not in yaml:
         return
 
-    fqrn = _get_role_fqrn(yaml['galaxy_info'])
+    fqrn = _get_role_fqrn(yaml["galaxy_info"])
 
-    if 'role-name' not in options.skip_list:
+    if "role-name" not in options.skip_list:
         if not re.match(r"[a-z0-9][a-z0-9_]+\.[a-z][a-z0-9_]+$", fqrn):
             msg = (
                 """\
@@ -276,16 +261,16 @@ As an alternative, you can add 'role-name' to either skip_list or warn_list.
 """
                 % fqrn
             )
-            if 'role-name' in options.warn_list:
+            if "role-name" in options.warn_list:
                 _logger.warning(msg)
             else:
                 _logger.error(msg)
                 sys.exit(INVALID_PREREQUISITES_RC)
     else:
         # when 'role-name' is in skip_list, we stick to plain role names
-        if 'role_name' in yaml['galaxy_info']:
-            role_namespace = _get_galaxy_role_ns(yaml['galaxy_info'])
-            role_name = _get_galaxy_role_name(yaml['galaxy_info'])
+        if "role_name" in yaml["galaxy_info"]:
+            role_namespace = _get_galaxy_role_ns(yaml["galaxy_info"])
+            role_name = _get_galaxy_role_name(yaml["galaxy_info"])
             fqrn = f"{role_namespace}{role_name}"
         else:
             fqrn = pathlib.Path(".").absolute().name
@@ -309,6 +294,10 @@ def _prepare_ansible_paths() -> None:
     """Configure Ansible environment variables."""
     library_paths: List[str] = []
     roles_path: List[str] = []
+    collection_list: List[str] = []
+
+    if ansible_collections_path() in os.environ:
+        collection_list = os.environ[ansible_collections_path()].split(":")
 
     for path_list, path in (
         (library_paths, "plugins/modules"),
@@ -320,9 +309,9 @@ def _prepare_ansible_paths() -> None:
         if path not in path_list and os.path.exists(path):
             path_list.append(path)
 
-    _update_env('ANSIBLE_LIBRARY', library_paths)
+    _update_env("ANSIBLE_LIBRARY", library_paths)
     _update_env(ansible_collections_path(), collection_list)
-    _update_env('ANSIBLE_ROLES_PATH', roles_path, default=ANSIBLE_DEFAULT_ROLES_PATH)
+    _update_env("ANSIBLE_ROLES_PATH", roles_path, default=ANSIBLE_DEFAULT_ROLES_PATH)
 
     # If we are asking to run without warnings, then also silence certain
     # Ansible warnings which could slip through, namely the devel branch
@@ -374,10 +363,10 @@ def _write_module_stub(
 def _update_env(varname: str, value: List[str], default: str = "") -> None:
     """Update colon based environment variable if needed. by appending."""
     if value:
-        orig_value = os.environ.get(varname, default=default)
+        orig_value = os.environ.get(varname, default)
         if orig_value:
             # Prepend original or default variable content to custom content.
-            value = [*orig_value.split(':'), *value]
+            value = [*orig_value.split(":"), *value]
         value_str = ":".join(value)
         if value_str != os.environ.get(varname, ""):
             os.environ[varname] = value_str
@@ -405,8 +394,8 @@ def _perform_mockings() -> None:
     if not yaml:
         # ignore empty galaxy.yml file
         return
-    namespace = yaml.get('namespace', None)
-    collection = yaml.get('name', None)
+    namespace = yaml.get("namespace", None)
+    collection = yaml.get("name", None)
     if not namespace or not collection:
         return
     p = pathlib.Path(
@@ -460,11 +449,11 @@ def require_collection(  # noqa: C901
     collection before failing.
     """
     try:
-        ns, coll = name.split('.', 1)
+        ns, coll = name.split(".", 1)
     except ValueError:
         sys.exit("Invalid collection name supplied: %s" % name)
 
-    paths = ansible_config_get('COLLECTIONS_PATHS', list)
+    paths = ansible_config_get("COLLECTIONS_PATHS", list)
     if not paths or not isinstance(paths, list):
         sys.exit(f"Unable to determine ansible collection paths. ({paths})")
 
@@ -474,20 +463,20 @@ def require_collection(  # noqa: C901
         paths.insert(0, f"{options.cache_dir}/collections")
 
     for path in paths:
-        collpath = os.path.join(path, 'ansible_collections', ns, coll)
+        collpath = os.path.join(path, "ansible_collections", ns, coll)
         if os.path.exists(collpath):
-            mpath = os.path.join(collpath, 'MANIFEST.json')
-            if not os.path.exists(mpath):
+            manifest_path = os.path.join(collpath, "MANIFEST.json")
+            if not os.path.exists(manifest_path):
                 _logger.fatal(
                     "Found collection at '%s' but missing MANIFEST.json, cannot get info.",
                     collpath,
                 )
                 sys.exit(INVALID_PREREQUISITES_RC)
 
-            with open(mpath, 'r') as f:
+            with open(manifest_path, "r") as f:
                 manifest = json.loads(f.read())
                 found_version = packaging.version.parse(
-                    manifest['collection_info']['version']
+                    manifest["collection_info"]["version"]
                 )
                 if version and found_version < packaging.version.parse(version):
                     if install:

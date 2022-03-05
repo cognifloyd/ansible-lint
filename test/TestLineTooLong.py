@@ -5,11 +5,12 @@ from ansiblelint.rules import RulesCollection
 from ansiblelint.rules.YamllintRule import YamllintRule
 from ansiblelint.testing import RunFromText
 
-LONG_LINE = '''\
+LONG_LINE = """\
+---
 - name: task example
   debug:
-    msg: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua tempor incididunt ut labore et dolore'
-'''  # noqa 501
+    msg: 'This is a very long text that is used in order to verify the rule that checks for very long lines. We do hope it was long enough to go over the line limit.'
+"""  # noqa 501
 
 
 class TestLineTooLongRule(unittest.TestCase):

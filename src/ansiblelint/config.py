@@ -69,10 +69,8 @@ options = Namespace(
     lintables=[],
     listrules=False,
     listtags=False,
-    fmt_yaml_files=False,  # True fmts all yaml files, not just those with LintErrors
-    do_transforms=False,  # implies fmt_yaml_files where files have LintErrors
+    write=False,
     parseable=False,
-    parseable_severity=False,
     quiet=False,
     rulesdirs=[],
     skip_list=[],
@@ -114,11 +112,7 @@ def ansible_collections_path() -> str:
     for env_var in ["ANSIBLE_COLLECTIONS_PATHS", "ANSIBLE_COLLECTIONS_PATH"]:
         if env_var in os.environ:
             return env_var
-
-    # https://github.com/ansible/ansible/pull/70007
-    if ansible_version() >= ansible_version("2.10.0.dev0"):
-        return "ANSIBLE_COLLECTIONS_PATH"
-    return "ANSIBLE_COLLECTIONS_PATHS"
+    return "ANSIBLE_COLLECTIONS_PATH"
 
 
 def parse_ansible_version(stdout: str) -> Tuple[str, Optional[str]]:
@@ -164,7 +158,3 @@ def ansible_version(version: str = "") -> Version:
             )
             sys.exit(ANSIBLE_MISSING_RC)
     return Version(version)
-
-
-if ansible_collections_path() in os.environ:
-    collection_list = os.environ[ansible_collections_path()].split(':')

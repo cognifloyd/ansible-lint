@@ -32,27 +32,27 @@ if TYPE_CHECKING:
 
 
 class TaskHasNameRule(AnsibleLintRule, TransformMixin):
-    id = 'unnamed-task'
-    shortdesc = 'All tasks should be named'
+    id = "unnamed-task"
+    shortdesc = "All tasks should be named"
     description = (
-        'All tasks should have a distinct name for readability '
-        'and for ``--start-at-task`` to work'
+        "All tasks should have a distinct name for readability "
+        "and for ``--start-at-task`` to work"
     )
     transform_description = (
         "This adds an empty name to every unnamed task to "
         "simplify adding names to tasks."
     )
-    severity = 'MEDIUM'
-    tags = ['idiom']
-    version_added = 'historic'
+    severity = "MEDIUM"
+    tags = ["idiom"]
+    version_added = "historic"
 
     # comment to add on the stubbed name: lines
     comment = "TODO: Name this task"
 
     def matchtask(
-        self, task: Dict[str, Any], file: 'Optional[Lintable]' = None
+        self, task: Dict[str, Any], file: "Optional[Lintable]" = None
     ) -> Union[bool, str]:
-        return not task.get('name')
+        return not task.get("name")
 
     def transform(
         self,
