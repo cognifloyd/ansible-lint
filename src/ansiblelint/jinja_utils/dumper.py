@@ -49,12 +49,18 @@ def dump(
         environment=environment,
         max_line_length=max_line_length,
         max_first_line_length=max_first_line_length,
-        stream=stream,
     )
     dumper.visit(node)
 
+    as_string = False
     if stream is None:
-        stream = cast(StringIO, dumper.stream)
+        stream = StringIO()
+        as_string = True
+
+    stream.write(str(dumper.tokens))
+
+    if as_string:
+        stream = cast(StringIO, stream)
         return stream.getvalue()
 
     return None
@@ -74,13 +80,9 @@ class TemplateDumper(NodeVisitor):
         environment: Environment,
         max_line_length: int,
         max_first_line_length: int | None = None,
-        stream: TextIO | None = None,
     ):
         """Create a TemplateDumper."""
-        if stream is None:
-            stream = StringIO()
         self.environment = environment
-        self.stream = stream
         self.tokens = TokenStream(
             max_line_length=max_line_length,
             max_first_line_length=max_first_line_length,
@@ -299,7 +301,6 @@ class TemplateDumper(NodeVisitor):
         # if self.tokens.line_number > 1 and self.tokens.line_position != 0:
         #     self.tokens.append(j2tokens.TOKEN_WHITESPACE, "\n")
         # TODO: write/preserve whitespace and comments at end
-        self.stream.write(str(self.tokens))
 
     def visit_Output(self, node: nodes.Template) -> None:
         """Write an ``Output`` node to the stream.
