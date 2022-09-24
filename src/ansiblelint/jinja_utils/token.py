@@ -3,22 +3,29 @@ from __future__ import annotations
 
 from abc import ABC
 from dataclasses import dataclass
-from typing import Iterator, Literal, Sequence, overload
+from typing import Final, Iterator, Literal, Sequence, overload
 
 from jinja2.lexer import (
+    TOKEN_ADD,  # +
     TOKEN_BLOCK_BEGIN,
     TOKEN_BLOCK_END,
     TOKEN_COMMENT_BEGIN,
     TOKEN_COMMENT_END,
+    TOKEN_DIV,  # /
     TOKEN_EOF,
+    TOKEN_FLOORDIV,  # //
     TOKEN_INITIAL,
     TOKEN_LINECOMMENT_BEGIN,
     TOKEN_LINECOMMENT_END,
     TOKEN_LINESTATEMENT_BEGIN,
     TOKEN_LINESTATEMENT_END,
+    TOKEN_MOD,  # %
+    TOKEN_MUL,  # *
     TOKEN_OPERATOR,
+    TOKEN_POW,  # **
     TOKEN_RAW_BEGIN,
     TOKEN_RAW_END,
+    TOKEN_SUB,  # -
     TOKEN_VARIABLE_BEGIN,
     TOKEN_VARIABLE_END,
     TOKEN_WHITESPACE,
@@ -52,6 +59,31 @@ TokenType = str
 ValueStr = str
 Chomp = Literal["+", "-", ""]
 Priority = int
+
+# new line priorities for whitespace tokens
+# if a line needs to be broken, prefer breaking at higher priority tokens.
+BLOCK_PAIR_PRIORITY: Final = 30  # maybe lower, prefer modifying chomp?
+EXPR_PAIR_PRIORITY: Final = 20
+FILTER_PRIORITY: Final = 20  # Jinja filters: |
+TEST_PRIORITY: Final = 10  # Jinja tests: is
+
+# these priorities copied from black with a few extras for Jinja
+COMMA_PRIORITY: Final = 18  # , breaks after not before
+TERNARY_PRIORITY: Final = 16  # ... if ... else ...
+LOGIC_PRIORITY: Final = 14  # and, or
+STRING_PRIORITY: Final = 12  # Jinja string concat: ~
+COMPARATOR_PRIORITY: Final = 10  # < > == != <= >= "in" "not in"
+MATH_PRIORITIES: Final = {
+    TOKEN_ADD: 5,  # +
+    TOKEN_SUB: 5,  # -
+    TOKEN_MUL: 4,  # *
+    TOKEN_DIV: 4,  # /
+    TOKEN_FLOORDIV: 4,  # //
+    TOKEN_MOD: 4,  # %
+    TOKEN_POW: 2,  # **
+}
+DOT_PRIORITY: Final = 1
+
 
 # pylint: disable=too-many-instance-attributes
 @dataclass  # this is mutable and DOES change after creation
@@ -442,7 +474,10 @@ class TokenStream(AbstractTokensCollection):
         """Extend with the given set of Jinja token type and value tuples."""
         for item in args:
             token, value = item[:2]
-            priority = item[2] if len(item) == 3 else 0
+            try:
+                priority = item[2]
+            except IndexError:
+                priority = 0
             self.append(token, value, priority=priority)
 
     def pair(
