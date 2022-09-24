@@ -58,7 +58,12 @@ def dump(
     dumper.visit(node)
 
     line_wrapper = LineWrapper()
-    line_wrapper.process(tokens)
+    try:
+        # see if it can fit on one line
+        line_wrapper.stringify(tokens, max_lines=1, max_length=max_first_line_length)
+    except ValueError:
+        # needs multiple lines
+        line_wrapper.process(tokens)
 
     as_string = False
     if stream is None:
