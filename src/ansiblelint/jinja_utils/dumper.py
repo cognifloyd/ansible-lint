@@ -12,6 +12,7 @@ from jinja2.environment import Environment
 from jinja2.visitor import NodeVisitor
 
 from .annotator import _AnnotatedNode
+from .line_wrapper import LineWrapper
 from .token import (
     BLOCK_PAIR_PRIORITY,
     COMMA_PRIORITY,
@@ -45,19 +46,26 @@ def dump(
     if not isinstance(node, nodes.Template):
         raise TypeError("Can't dump non template nodes")
 
-    dumper = TemplateDumper(
-        environment=environment,
+    tokens = TokenStream(
         max_line_length=max_line_length,
         max_first_line_length=max_first_line_length,
     )
+
+    dumper = TemplateDumper(
+        environment=environment,
+        token_stream=tokens,
+    )
     dumper.visit(node)
+
+    line_wrapper = LineWrapper()
+    line_wrapper.process(tokens)
 
     as_string = False
     if stream is None:
         stream = StringIO()
         as_string = True
 
-    stream.write(str(dumper.tokens))
+    stream.write(str(tokens))
 
     if as_string:
         stream = cast(StringIO, stream)
@@ -69,7 +77,7 @@ def dump(
 # Ignore these because they're required by Jinja2's NodeVisitor interface
 # pylint: disable=too-many-public-methods,invalid-name
 class TemplateDumper(NodeVisitor):
-    """Dump a jinja2 AST back into a jinja2 template.
+    """Dump a jinja2 AST back into a jinja2 template tokens stream.
 
     This facilitates AST-based template modification.
     This is based on jinja2.compiler.CodeGenerator
@@ -78,17 +86,11 @@ class TemplateDumper(NodeVisitor):
     def __init__(
         self,
         environment: Environment,
-        max_line_length: int,
-        max_first_line_length: int | None = None,
+        token_stream: TokenStream,
     ):
         """Create a TemplateDumper."""
         self.environment = environment
-        self.tokens = TokenStream(
-            max_line_length=max_line_length,
-            max_first_line_length=max_first_line_length,
-        )
-        self._block_stmt_start_position = -1
-        self._block_stmt_start_line = -1
+        self.tokens = token_stream
 
     # -- Various compilation helpers
 
@@ -115,8 +117,6 @@ class TemplateDumper(NodeVisitor):
                     end_string = pair_closer.value_str
                     end_chomp = pair_closer.chomp
 
-        self._block_stmt_start_position = self.tokens.line_position
-        self._block_stmt_start_line = self.tokens.line_number
         with self.tokens.pair(
             (j2tokens.TOKEN_BLOCK_BEGIN, start_string, start_chomp, 0),
             (j2tokens.TOKEN_BLOCK_END, end_string, end_chomp, 0),
@@ -132,16 +132,6 @@ class TemplateDumper(NodeVisitor):
                         (j2tokens.TOKEN_WHITESPACE, SPACE),
                     )
                 yield
-        if (
-            # if the block starts in the middle of a line, keep it inline.
-            self._block_stmt_start_position == 0
-            # if the block statement uses multiple lines, don't inline the body.
-            or self._block_stmt_start_line != self.tokens.line_number
-        ):
-            if "\n" not in end_string:  # TODO: does this make sense?
-                self.tokens.append(j2tokens.TOKEN_WHITESPACE, "\n")
-            self._block_stmt_start_position = -1
-            self._block_stmt_start_line = -1
 
     @contextmanager
     def token_pair_variable(self, node: nodes.Node) -> Iterator[None]:
