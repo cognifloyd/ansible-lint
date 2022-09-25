@@ -50,6 +50,20 @@ class LineWrapper:
         return string
 
     def process(self, tokens: TokenStream) -> None:
+        # chomp TemplateData / Block / Var / Comment
+        self.update_chomps(tokens)
+        # expr: ()[]{} pairs
+        self.expr_pairs(tokens)
+        # priority based newline
+        self.add_priority_newlines(tokens)
+
+    def update_chomps(self, tokens: TokenStream) -> None:
+        pass
+
+    def expr_pairs(self, tokens: TokenStream) -> None:
+        pass
+
+    def add_priority_newlines(self, tokens: TokenStream) -> None:
         pass
 
     # old logic from dumper
