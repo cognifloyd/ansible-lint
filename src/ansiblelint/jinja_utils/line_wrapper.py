@@ -1,7 +1,7 @@
 """Jinja template/expression line wrapper utils for dumping."""
 from __future__ import annotations
 
-from .token import TokenStream
+from .token import Token, TokenStream
 
 
 class LineWrapper:
@@ -16,7 +16,7 @@ class LineWrapper:
 
     def stringify(
         self,
-        tokens: TokenStream,
+        tokens: Iterable[Token],
         max_lines: int | None = None,
         max_length: int | None = None,
     ) -> str:

@@ -60,7 +60,9 @@ def dump(
     line_wrapper = LineWrapper()
     try:
         # see if it can fit on one line
-        line_wrapper.stringify(tokens, max_lines=1, max_length=max_first_line_length)
+        line_wrapper.stringify(
+            tokens.tokens, max_lines=1, max_length=max_first_line_length
+        )
     except ValueError:
         # needs multiple lines
         line_wrapper.process(tokens)
